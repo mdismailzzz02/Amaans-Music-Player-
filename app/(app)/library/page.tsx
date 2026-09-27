@@ -35,18 +35,27 @@ export default function LibraryPage() {
 
   const fetchSongsAndProfile = useCallback(async () => {
     try {
-      const [songs, profile, liked, pls] = await Promise.all([
+      // Fetch core data (if this fails, the whole page fails)
+      const [fetchedSongs, profile] = await Promise.all([
         fetchSongs(),
-        fetchProfile(),
-        fetchLikedSongIds(),
-        fetchPlaylists(),
+        fetchProfile()
       ]);
-      setSongs(songs);
+      setSongs(fetchedSongs);
       if (profile) setIsPublic(profile.is_public);
-      setLikedIds(liked);
-      setPlaylists(pls);
+
+      // Fetch supplementary data (likes and playlists) — don't fail the whole page if these error
+      try {
+        const liked = await fetchLikedSongIds();
+        setLikedIds(liked);
+      } catch (e) { console.error('Failed to load likes:', e); }
+
+      try {
+        const pls = await fetchPlaylists();
+        setPlaylists(pls);
+      } catch (e) { console.error('Failed to load playlists:', e); }
+
     } catch (err) {
-      console.error('Failed to load data:', err);
+      console.error('Failed to load core data:', err);
     } finally {
       setLoading(false);
     }
