@@ -10,7 +10,7 @@
  */
 
 import { createClient } from '@/lib/supabase/client';
-import type { Song } from '@/lib/types';
+import type { Song, Playlist, PlaylistSong, LikedSong } from '@/lib/types';
 
 const R2_PUBLIC_URL = (process.env.NEXT_PUBLIC_R2_PUBLIC_URL ?? '').trim().replace(/\/$/, '');
 const WORKER_URL = (process.env.NEXT_PUBLIC_WORKER_URL ?? '').trim().replace(/\/$/, '');
@@ -215,4 +215,165 @@ export async function updateProfile(data: Partial<{ is_public: boolean }>): Prom
   }
 
   return profile;
+}
+
+// ─── Liked Songs ──────────────────────────────────────────────────────────────
+
+export async function fetchLikedSongs(): Promise<Song[]> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+
+  const { data, error } = await supabase
+    .from('liked_songs')
+    .select('song_id, songs(*)')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row: any) => row.songs).filter(Boolean);
+}
+
+export async function likeSong(songId: string): Promise<void> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+
+  const { error } = await supabase
+    .from('liked_songs')
+    .upsert({ user_id: user.id, song_id: songId }, { onConflict: 'user_id,song_id', ignoreDuplicates: true });
+
+  if (error) throw new Error(error.message);
+}
+
+export async function unlikeSong(songId: string): Promise<void> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+
+  const { error } = await supabase
+    .from('liked_songs')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('song_id', songId);
+
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchLikedSongIds(): Promise<Set<string>> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return new Set();
+
+  const { data } = await supabase
+    .from('liked_songs')
+    .select('song_id')
+    .eq('user_id', user.id);
+
+  return new Set((data ?? []).map((r: any) => r.song_id));
+}
+
+// ─── Playlists ────────────────────────────────────────────────────────────────
+
+export async function fetchPlaylists(): Promise<Playlist[]> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+
+  const { data, error } = await supabase
+    .from('playlists')
+    .select('*, playlist_songs(count)')
+    .eq('user_id', user.id)
+    .order('created_at', { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((p: any) => ({
+    ...p,
+    song_count: p.playlist_songs?.[0]?.count ?? 0,
+  }));
+}
+
+export async function createPlaylist(name: string): Promise<Playlist> {
+  const supabase = createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Unauthorized');
+
+  const { data, error } = await supabase
+    .from('playlists')
+    .insert({ user_id: user.id, name })
+    .select()
+    .single();
+
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function deletePlaylist(id: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from('playlists').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+export async function renamePlaylist(id: string, name: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('playlists')
+    .update({ name, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+export async function updatePlaylistVisibility(id: string, is_public: boolean): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('playlists')
+    .update({ is_public, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+export async function fetchPlaylistSongs(playlistId: string): Promise<Song[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from('playlist_songs')
+    .select('position, songs(*)')
+    .eq('playlist_id', playlistId)
+    .order('position', { ascending: true });
+
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row: any) => row.songs).filter(Boolean);
+}
+
+export async function addSongToPlaylist(playlistId: string, songId: string): Promise<void> {
+  const supabase = createClient();
+
+  // Get current max position
+  const { data: existing } = await supabase
+    .from('playlist_songs')
+    .select('position')
+    .eq('playlist_id', playlistId)
+    .order('position', { ascending: false })
+    .limit(1);
+
+  const nextPosition = (existing?.[0]?.position ?? -1) + 1;
+
+  const { error } = await supabase
+    .from('playlist_songs')
+    .upsert(
+      { playlist_id: playlistId, song_id: songId, position: nextPosition },
+      { onConflict: 'playlist_id,song_id', ignoreDuplicates: true }
+    );
+
+  if (error) throw new Error(error.message);
+}
+
+export async function removeSongFromPlaylist(playlistId: string, songId: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('playlist_songs')
+    .delete()
+    .eq('playlist_id', playlistId)
+    .eq('song_id', songId);
+  if (error) throw new Error(error.message);
 }

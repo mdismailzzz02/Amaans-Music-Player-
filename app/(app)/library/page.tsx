@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import type { Song } from '@/lib/types';
+import type { Song, Playlist } from '@/lib/types';
 import { usePlayer } from '@/components/PlayerContext';
-import { fetchSongs, deleteSong, fetchProfile, updateProfile } from '@/lib/api';
+import { fetchSongs, deleteSong, fetchProfile, updateProfile, fetchLikedSongIds, likeSong, unlikeSong, fetchPlaylists, addSongToPlaylist } from '@/lib/api';
 
 function formatTime(seconds: number): string {
   if (!seconds || !isFinite(seconds)) return '--:--';
@@ -28,16 +28,23 @@ export default function LibraryPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [isPublic, setIsPublic] = useState(false);
   const [isUpdatingPublic, setIsUpdatingPublic] = useState(false);
+  const [likedIds, setLikedIds] = useState<Set<string>>(new Set());
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [menuSongId, setMenuSongId] = useState<string | null>(null);
   const { playSong, currentSong, isPlaying } = usePlayer();
 
   const fetchSongsAndProfile = useCallback(async () => {
     try {
-      const [songs, profile] = await Promise.all([
+      const [songs, profile, liked, pls] = await Promise.all([
         fetchSongs(),
-        fetchProfile()
+        fetchProfile(),
+        fetchLikedSongIds(),
+        fetchPlaylists(),
       ]);
       setSongs(songs);
       if (profile) setIsPublic(profile.is_public);
+      setLikedIds(liked);
+      setPlaylists(pls);
     } catch (err) {
       console.error('Failed to load data:', err);
     } finally {
@@ -59,6 +66,26 @@ export default function LibraryPage() {
     } finally {
       setDeletingId(null);
     }
+  }
+
+  async function handleLike(song: Song, e: React.MouseEvent) {
+    e.stopPropagation();
+    try {
+      if (likedIds.has(song.id)) {
+        await unlikeSong(song.id);
+        setLikedIds(prev => { const n = new Set(prev); n.delete(song.id); return n; });
+      } else {
+        await likeSong(song.id);
+        setLikedIds(prev => new Set([...prev, song.id]));
+      }
+    } catch (err) { console.error(err); }
+  }
+
+  async function handleAddToPlaylist(playlistId: string, songId: string) {
+    try {
+      await addSongToPlaylist(playlistId, songId);
+      setMenuSongId(null);
+    } catch (err) { console.error(err); }
   }
 
   function handlePlay(song: Song) {
@@ -207,7 +234,51 @@ export default function LibraryPage() {
                 onClick={() => handlePlay(song)}
               >
                 {/* Actions */}
-                <div className="song-card-actions">
+                <div className="song-card-actions" style={{ display: 'flex', gap: 4 }}>
+                  {/* Like button */}
+                  <button
+                    id={`like-${song.id}`}
+                    className="btn btn-icon"
+                    onClick={(e) => handleLike(song, e)}
+                    aria-label={likedIds.has(song.id) ? 'Unlike' : 'Like'}
+                    title={likedIds.has(song.id) ? 'Unlike' : 'Like'}
+                    style={{ color: likedIds.has(song.id) ? '#e11d48' : undefined }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill={likedIds.has(song.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                    </svg>
+                  </button>
+                  {/* Add to playlist menu */}
+                  <div style={{ position: 'relative' }}>
+                    <button
+                      id={`menu-${song.id}`}
+                      className="btn btn-icon"
+                      onClick={(e) => { e.stopPropagation(); setMenuSongId(menuSongId === song.id ? null : song.id); }}
+                      title="Add to playlist"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="5" r="1" fill="currentColor" /><circle cx="12" cy="12" r="1" fill="currentColor" /><circle cx="12" cy="19" r="1" fill="currentColor" />
+                      </svg>
+                    </button>
+                    {menuSongId === song.id && (
+                      <div onClick={e => e.stopPropagation()} style={{
+                        position: 'absolute', top: '100%', right: 0, zIndex: 100,
+                        background: 'var(--bg-card)', border: '1px solid var(--border)',
+                        borderRadius: 8, padding: '4px 0', minWidth: 160,
+                        boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                      }}>
+                        <div style={{ padding: '4px 12px 6px', fontSize: '0.72rem', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', marginBottom: 4 }}>Add to playlist</div>
+                        {playlists.length === 0 && <div style={{ padding: '4px 12px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>No playlists yet</div>}
+                        {playlists.map(pl => (
+                          <button key={pl.id} onClick={() => handleAddToPlaylist(pl.id, song.id)}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: '0.82rem', padding: '6px 12px', cursor: 'pointer' }}>
+                            {pl.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {/* Delete */}
                   <button
                     id={`delete-${song.id}`}
                     className="btn btn-icon btn-danger"
@@ -288,6 +359,50 @@ export default function LibraryPage() {
                 </div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>{formatSize(song.file_size)}</div>
                 <div className="song-list-duration">{formatTime(song.duration)}</div>
+                {/* Like */}
+                <button
+                  id={`list-like-${song.id}`}
+                  className="btn btn-icon"
+                  onClick={(e) => handleLike(song, e)}
+                  title={likedIds.has(song.id) ? 'Unlike' : 'Like'}
+                  style={{ color: likedIds.has(song.id) ? '#e11d48' : undefined, opacity: likedIds.has(song.id) ? 1 : 0.5 }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill={likedIds.has(song.id) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+                  </svg>
+                </button>
+                {/* Playlist menu */}
+                <div style={{ position: 'relative' }}>
+                  <button
+                    id={`list-menu-${song.id}`}
+                    className="btn btn-icon"
+                    onClick={(e) => { e.stopPropagation(); setMenuSongId(menuSongId === song.id ? null : song.id); }}
+                    title="Add to playlist"
+                    style={{ opacity: 0.5 }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="5" r="1" fill="currentColor" /><circle cx="12" cy="12" r="1" fill="currentColor" /><circle cx="12" cy="19" r="1" fill="currentColor" />
+                    </svg>
+                  </button>
+                  {menuSongId === song.id && (
+                    <div onClick={e => e.stopPropagation()} style={{
+                      position: 'absolute', top: '100%', right: 0, zIndex: 100,
+                      background: 'var(--bg-card)', border: '1px solid var(--border)',
+                      borderRadius: 8, padding: '4px 0', minWidth: 160,
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                    }}>
+                      <div style={{ padding: '4px 12px 6px', fontSize: '0.72rem', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', marginBottom: 4 }}>Add to playlist</div>
+                      {playlists.length === 0 && <div style={{ padding: '4px 12px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>No playlists yet</div>}
+                      {playlists.map(pl => (
+                        <button key={pl.id} onClick={() => handleAddToPlaylist(pl.id, song.id)}
+                          style={{ display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: '0.82rem', padding: '6px 12px', cursor: 'pointer' }}>
+                          {pl.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Delete */}
                 <button
                   id={`list-delete-${song.id}`}
                   className="btn btn-icon btn-danger"

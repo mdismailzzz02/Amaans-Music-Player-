@@ -96,3 +96,83 @@ DROP TRIGGER IF EXISTS songs_updated_at ON songs;
 CREATE TRIGGER songs_updated_at
   BEFORE UPDATE ON songs
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================
+-- Liked Songs
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS liked_songs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  song_id UUID NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, song_id)
+);
+
+ALTER TABLE liked_songs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users manage own likes" ON liked_songs;
+CREATE POLICY "Users manage own likes"
+  ON liked_songs FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+-- ============================================================
+-- Playlists
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS playlists (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  is_public BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE playlists ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users manage own playlists" ON playlists;
+CREATE POLICY "Users manage own playlists"
+  ON playlists FOR ALL
+  USING (auth.uid() = user_id OR is_public = true)
+  WITH CHECK (auth.uid() = user_id);
+
+DROP TRIGGER IF EXISTS playlists_updated_at ON playlists;
+CREATE TRIGGER playlists_updated_at
+  BEFORE UPDATE ON playlists
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================================
+-- Playlist Songs (junction table)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS playlist_songs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  playlist_id UUID NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  song_id UUID NOT NULL REFERENCES songs(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 0,
+  added_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(playlist_id, song_id)
+);
+
+ALTER TABLE playlist_songs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users manage own playlist songs" ON playlist_songs;
+CREATE POLICY "Users manage own playlist songs"
+  ON playlist_songs FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM playlists
+      WHERE playlists.id = playlist_songs.playlist_id
+        AND (playlists.user_id = auth.uid() OR playlists.is_public = true)
+    )
+  )
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM playlists
+      WHERE playlists.id = playlist_songs.playlist_id
+        AND playlists.user_id = auth.uid()
+    )
+  );
+
