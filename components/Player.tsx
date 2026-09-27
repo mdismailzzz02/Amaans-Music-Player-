@@ -13,6 +13,7 @@ export default function Player() {
   const {
     currentSong, isPlaying, currentTime, duration, volume,
     togglePlay, seek, setVolume, playNext, playPrev,
+    playError, clearPlayError,
   } = usePlayer();
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -29,7 +30,28 @@ export default function Player() {
   }
 
   return (
-    <div className="player-bar">
+    <div className="player-bar" style={{ flexDirection: 'column', gap: 0, padding: 0 }}>
+      {/* Error banner */}
+      {playError && (
+        <div style={{
+          width: '100%',
+          background: 'rgba(239,68,68,0.15)',
+          borderBottom: '1px solid rgba(239,68,68,0.3)',
+          color: '#fca5a5',
+          fontSize: '0.78rem',
+          padding: '6px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <span style={{ flex: 1 }}>{playError}</span>
+          <button onClick={clearPlayError} style={{ background: 'none', border: 'none', color: '#fca5a5', cursor: 'pointer', padding: '0 4px', fontSize: '1rem', lineHeight: 1 }} aria-label="Dismiss error">×</button>
+        </div>
+      )}
+      <div className="player-bar" style={{ width: '100%', boxShadow: 'none', borderTop: 'none' }}>
       {/* Song info */}
       <div className="player-song-info">
         <div className={`player-cover ${isPlaying ? 'playing' : ''}`}>
@@ -128,6 +150,7 @@ export default function Player() {
           aria-label="Volume"
         />
       </div>
+    </div>
     </div>
   );
 }

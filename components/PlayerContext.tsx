@@ -11,6 +11,7 @@ interface PlayerState {
   currentTime: number;
   duration: number;
   volume: number;
+  playError: string | null; // set when the current track cannot be loaded
 }
 
 interface PlayerContextValue extends PlayerState {
@@ -20,6 +21,7 @@ interface PlayerContextValue extends PlayerState {
   setVolume: (vol: number) => void;
   playNext: () => void;
   playPrev: () => void;
+  clearPlayError: () => void;
 }
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -32,6 +34,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(0.8);
+  const [playError, setPlayError] = useState<string | null>(null);
 
   // Initialize audio element
   useEffect(() => {
@@ -58,6 +61,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     });
     audio.addEventListener('play', () => setIsPlaying(true));
     audio.addEventListener('pause', () => setIsPlaying(false));
+    audio.addEventListener('error', () => {
+      // MediaError codes: 1=ABORTED, 2=NETWORK, 3=DECODE, 4=SRC_NOT_SUPPORTED
+      const code = audio.error?.code;
+      const msg = code === 4
+        ? 'Track file not found or format unsupported. It may have been deleted from storage.'
+        : `Playback error (code ${code ?? 'unknown'}). Check your connection.`;
+      setPlayError(msg);
+      setIsPlaying(false);
+    });
 
     return () => {
       audio.pause();
@@ -74,12 +86,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     setCurrentTime(0);
     setDuration(0);
 
-    // Get signed URL directly from Supabase Storage
+    setPlayError(null);
     try {
       const url = await getStreamUrl(song.id, song.file_key);
+
+      if (!url || !url.startsWith('http')) {
+        setPlayError('Could not resolve a valid stream URL for this track.');
+        console.error('Invalid stream URL for song:', song.title, url);
+        return;
+      }
+
       audio.src = url;
       audio.dataset.songId = song.id;
-      audio.play().catch(console.error);
+      audio.load();
+      // The 'error' event listener above will handle load failures (404, decode errors, etc.)
+      audio.play().catch((err: Error) => {
+        if (err.name !== 'AbortError') {
+          // AbortError is expected when src changes mid-play; ignore it
+          console.error('Playback error:', err);
+        }
+      });
     } catch (err) {
       console.error('Failed to get stream URL:', err);
     }
@@ -136,12 +162,16 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentSong, queue, loadAndPlay, seek]);
 
+  const clearPlayError = useCallback(() => setPlayError(null), []);
+
   return (
     <PlayerContext.Provider value={{
       currentSong, queue, isPlaying,
       currentTime, duration, volume,
+      playError,
       playSong, togglePlay, seek, setVolume,
       playNext, playPrev,
+      clearPlayError,
     }}>
       {children}
     </PlayerContext.Provider>

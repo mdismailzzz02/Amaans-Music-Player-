@@ -71,10 +71,10 @@ export async function uploadSong(
 
   onProgress?.(10);
 
-  // Generate a unique storage key: {userId}/{uuid}.{ext}
+  // Generate a unique storage key matching the bucket structure: songs/{userId}/{uuid}.{ext}
   const ext = file.name.split('.').pop() || 'mp3';
   const uuid = crypto.randomUUID();
-  const fileKey = `${user.id}/${uuid}.${ext}`;
+  const fileKey = `songs/${user.id}/${uuid}.${ext}`;
 
   onProgress?.(20);
 
@@ -145,8 +145,8 @@ export async function getStreamUrl(songId: string, fileKey: string): Promise<str
       }
     });
 
-  // Strip old "songs/" R2 prefix if present (legacy migration artifact)
-  const storageKey = fileKey.startsWith('songs/') ? fileKey.slice(6) : fileKey;
+  // All objects in the bucket live under songs/ — ensure the prefix is present
+  const storageKey = fileKey.startsWith('songs/') ? fileKey : `songs/${fileKey}`;
 
   if (!R2_PUBLIC_URL) throw new Error('R2_PUBLIC_URL not configured');
   return `${R2_PUBLIC_URL}/${storageKey}`;
@@ -166,24 +166,27 @@ export async function fetchProfile(): Promise<Profile> {
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) throw new Error('Unauthorized');
 
-  // Try to fetch existing profile
-  const { data: existing } = await supabase
+  // Upsert to avoid race conditions where two concurrent calls both try to insert
+  const { data: profile, error: upsertError } = await supabase
     .from('profiles')
-    .select('*')
-    .eq('id', user.id)
+    .upsert({ id: user.id, is_public: false }, { onConflict: 'id', ignoreDuplicates: true })
+    .select()
     .maybeSingle();
 
-  if (existing) return existing;
+  if (profile) return profile;
 
-  // Profile doesn't exist — create it
-  const { data: newProfile, error: insertError } = await supabase
-    .from('profiles')
-    .insert({ id: user.id, is_public: false })
-    .select()
-    .single();
+  // ignoreDuplicates means existing rows aren't returned — do a plain fetch fallback
+  if (!upsertError) {
+    const { data: existing, error: fetchError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+    if (fetchError) throw new Error(fetchError.message);
+    return existing;
+  }
 
-  if (insertError) throw new Error(insertError.message);
-  return newProfile;
+  throw new Error(upsertError.message);
 }
 
 export async function updateProfile(data: Partial<{ is_public: boolean }>): Promise<Profile> {

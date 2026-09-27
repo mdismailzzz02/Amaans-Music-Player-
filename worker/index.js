@@ -49,8 +49,9 @@ export default {
 
       if (!fileKey) return json({ error: 'X-File-Key header required' }, 400);
 
-      // Only allow users to upload to their own folder
-      if (!fileKey.startsWith(`${userId}/`)) {
+      // Only allow users to upload to their own folder (songs/{userId}/ or {userId}/)
+      const isAllowed = fileKey.startsWith(`songs/${userId}/`) || fileKey.startsWith(`${userId}/`);
+      if (!isAllowed) {
         return json({ error: 'Forbidden' }, 403);
       }
 
@@ -68,8 +69,9 @@ export default {
       const fileKey = request.headers.get('X-File-Key');
       if (!fileKey) return json({ error: 'X-File-Key header required' }, 400);
 
-      // Only allow users to delete their own files
-      if (!fileKey.startsWith(`${userId}/`)) {
+      // Only allow users to delete their own files (songs/{userId}/ or {userId}/)
+      const isAllowed = fileKey.startsWith(`songs/${userId}/`) || fileKey.startsWith(`${userId}/`);
+      if (!isAllowed) {
         return json({ error: 'Forbidden' }, 403);
       }
 
