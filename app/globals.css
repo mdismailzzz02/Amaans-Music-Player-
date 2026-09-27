@@ -639,6 +639,8 @@ input[type='range']::-webkit-slider-thumb:hover {
   transition: all 0.2s var(--ease-out);
   cursor: pointer;
   border: none;
+  color: var(--text-primary);
+  background: transparent;
 }
 
 .btn-primary {
